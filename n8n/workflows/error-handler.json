@@ -1,0 +1,92 @@
+{
+  "name": "LendLoop – Error handler",
+  "nodes": [
+    {
+      "id": "lendloop-error-handler-0",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "lendloop-error-handler-1",
+      "name": "Report & sign",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst sign = (body) => {\n  const secret = $env.N8N_TO_LENDLOOP_SECRET;\n  if (!secret) throw new Error('N8N_TO_LENDLOOP_SECRET is not set');\n  const t = Math.floor(Date.now() / 1000);\n  return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;\n};\nconst e = $input.first().json;\nconst report = {\n  executionId: String(e.execution?.id ?? `trigger-${Date.now()}`),\n  workflow: e.workflow?.name ?? 'unknown',\n  message: `${e.execution?.lastNodeExecuted ?? 'trigger'}: ${e.execution?.error?.message ?? e.trigger?.error?.message ?? 'unknown error'}`,\n};\nconsole.error('[LendLoop] workflow failed', JSON.stringify(report));\nconst body = JSON.stringify(report);\nreturn [{ json: { body, signature: sign(body) } }];"
+      }
+    },
+    {
+      "id": "lendloop-error-handler-2",
+      "name": "Record failure in LendLoop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_SITE_URL }}/n8n/workflow-error",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Report & sign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report & sign": {
+      "main": [
+        [
+          {
+            "node": "Record failure in LendLoop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}

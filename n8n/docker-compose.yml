@@ -1,0 +1,24 @@
+# Self-hosted n8n for LendLoop. Secrets come from n8n/.env (gitignored), never from workflow JSON.
+services:
+  n8n:
+    image: n8nio/n8n:1.114.4
+    restart: unless-stopped
+    ports: ["5678:5678"]
+    environment:
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-UTC}
+      TZ: ${GENERIC_TIMEZONE:-UTC}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set in n8n/.env}  # encrypts stored n8n credentials
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      # Code nodes need crypto (HMAC) and read the LendLoop secrets from env.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      CODE_ENABLE_STDOUT: "true"  # mock notifications show up in `docker compose logs`
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      LENDLOOP_TO_N8N_SECRET: ${LENDLOOP_TO_N8N_SECRET:?set in n8n/.env}
+      N8N_TO_LENDLOOP_SECRET: ${N8N_TO_LENDLOOP_SECRET:?set in n8n/.env}
+      CONVEX_SITE_URL: ${CONVEX_SITE_URL:?set in n8n/.env}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+volumes:
+  n8n_data:
