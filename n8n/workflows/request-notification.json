@@ -1,0 +1,172 @@
+{
+  "name": "LendLoop – Request notification",
+  "nodes": [
+    {
+      "id": "lendloop-request-notification-0",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "lendloop-request",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "lendloop-request-notification-1",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Rejects anything not signed by Convex with LENDLOOP_TO_N8N_SECRET in the last 5 minutes.\nconst crypto = require('crypto');\nconst { headers, body } = $input.first().json;\nconst secret = $env.LENDLOOP_TO_N8N_SECRET;\nconst m = String(headers['x-lendloop-signature'] || '').match(/^t=(\\d+),v1=([0-9a-f]{64})$/);\nlet valid = false;\nif (secret && m && Math.abs(Date.now() / 1000 - Number(m[1])) <= 300) {\n  // Convex signs JSON.stringify(payload); re-stringifying the parsed body yields the same bytes.\n  const expected = crypto.createHmac('sha256', secret).update(`${m[1]}.${JSON.stringify(body)}`).digest();\n  const got = Buffer.from(m[2], 'hex');\n  valid = got.length === expected.length && crypto.timingSafeEqual(got, expected);\n}\nreturn [{ json: { valid, event: valid ? body : null } }];"
+      }
+    },
+    {
+      "id": "lendloop-request-notification-2",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "lendloop-request-notification-3",
+      "name": "Send notification (mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Swap this node for Email/Slack/Discord (using n8n credentials). Dedupes on eventId so\n// a Convex retry after a lost response never notifies twice.\nconst { event } = $input.first().json;\nconst seen = $getWorkflowStaticData('global');\nseen.eventIds = seen.eventIds || [];\nif (seen.eventIds.includes(event.eventId)) return [{ json: { ok: true, duplicate: true } }];\n\nconst lines = {\n  'request.created': `${event.recipient.name}, a neighbor wants to borrow your ${event.toolName} (${event.startDate} → ${event.endDate}).`,\n  'request.approved': `${event.recipient.name}, your request for the ${event.toolName} was approved. Pick-up from ${event.startDate}.`,\n  'request.declined': `${event.recipient.name}, your request for the ${event.toolName} was declined.`,\n  'request.cancelled': `${event.recipient.name}, a request for your ${event.toolName} was withdrawn.`,\n  'loan.returned': `${event.recipient.name}, thanks for returning the ${event.toolName}!`,\n};\nconst message = lines[event.event] || `${event.toolName}: ${event.status}`;\nconsole.log(`[LendLoop] to <${event.recipient.email}>: ${message}`);\n\nseen.eventIds = [...seen.eventIds, event.eventId].slice(-1000);\nreturn [{ json: { ok: true, message } }];"
+      }
+    },
+    {
+      "id": "lendloop-request-notification-4",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "lendloop-request-notification-5",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        400
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'invalid signature' }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Send notification (mock)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send notification (mock)": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
