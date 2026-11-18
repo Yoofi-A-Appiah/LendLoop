@@ -62,6 +62,13 @@ npm run dev
 npx convex run users:setRole '{"email":"you@example.com","role":"admin"}'
 ```
 
+5. Optional: fill the rack with demo data. This adds five fictional neighbors (`example.com` emails that can never sign in), 24 tools, and loans in every state. Passing your email also adds a request for one of your tools and a loan you're borrowing.
+
+```bash
+npx convex run seed:run '{"you":"you@example.com"}'
+npx convex run seed:clear   # removes only what seed:run created
+```
+
 ### 2. n8n
 
 ```bash

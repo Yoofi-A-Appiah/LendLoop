@@ -12,6 +12,13 @@ async function loansForTool(ctx: QueryCtx, toolId: Id<"tools">) {
   return ctx.db.query("loans").withIndex("by_tool", (q) => q.eq("toolId", toolId)).collect();
 }
 
+/** Approved bookings that haven't ended: dates only, never who borrowed. */
+export async function bookedRanges(ctx: QueryCtx, toolId: Id<"tools">, day: string) {
+  return (await loansForTool(ctx, toolId))
+    .filter((l) => l.status === "approved" && l.endDate >= day)
+    .map((l) => ({ startDate: l.startDate, endDate: l.endDate }));
+}
+
 export async function activeLoan(ctx: QueryCtx, toolId: Id<"tools">, day: string) {
   return (await loansForTool(ctx, toolId)).find((l) => l.status === "approved" && l.startDate <= day) ?? null;
 }
@@ -109,19 +116,26 @@ export const markReturned = mutation({
 
 // ---------- views ----------
 
-async function enrich(ctx: QueryCtx, loans: Doc<"loans">[]) {
+/** `viewer` is the party looking at the list; they see the other party's email only once approved. */
+async function enrich(ctx: QueryCtx, loans: Doc<"loans">[], viewer?: Id<"users">) {
   return Promise.all(
     loans.map(async (l) => {
-      const [owner, borrower, events] = await Promise.all([
+      const [owner, borrower, tool, events] = await Promise.all([
         ctx.db.get(l.ownerId),
         ctx.db.get(l.borrowerId),
+        ctx.db.get(l.toolId),
         ctx.db.query("automationEvents").withIndex("by_loan", (q) => q.eq("loanId", l._id)).order("desc").take(3),
       ]);
       return {
         ...l,
         ownerName: owner?.name ?? "Unknown",
         borrowerName: borrower?.name ?? "Unknown",
+        category: tool?.category ?? "other", // tool may have been deleted since
         overdue: l.status === "approved" && l.endDate < today(),
+        contactEmail:
+          viewer && (l.status === "approved" || l.status === "returned")
+            ? (viewer === l.borrowerId ? owner : viewer === l.ownerId ? borrower : null)?.email || null
+            : null,
         activity: events.map((e) => ({ kind: e.kind, status: e.status, detail: e.detail, at: e.at })),
       };
     }),
@@ -133,7 +147,7 @@ export const mine = query({
   handler: async (ctx) => {
     const me = await requireUser(ctx);
     const loans = await ctx.db.query("loans").withIndex("by_borrower", (q) => q.eq("borrowerId", me._id)).order("desc").collect();
-    return enrich(ctx, loans);
+    return enrich(ctx, loans, me._id);
   },
 });
 
@@ -142,7 +156,7 @@ export const incoming = query({
   handler: async (ctx) => {
     const me = await requireUser(ctx);
     const loans = await ctx.db.query("loans").withIndex("by_owner", (q) => q.eq("ownerId", me._id)).order("desc").collect();
-    return enrich(ctx, loans);
+    return enrich(ctx, loans, me._id);
   },
 });
 

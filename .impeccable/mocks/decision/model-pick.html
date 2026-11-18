@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Due-Date Card</title>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Archivo+Black&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}body{width:1440px;height:900px;background:#2f4a3a;font-family:'Courier Prime',monospace;color:#1c1c1c;overflow:hidden;display:grid;place-items:center}
+.pocket{width:1180px;height:780px;background:#e7d9b0;border-radius:6px;position:relative;padding:56px 72px;box-shadow:0 30px 60px rgba(0,0,0,.35)}
+.pocket:after{content:"";position:absolute;left:0;right:0;bottom:0;height:300px;background:#d9c48e;border-top:2px dashed rgba(0,0,0,.2)}
+h1{font-family:'Archivo Black';font-size:76px;line-height:1;text-transform:uppercase;letter-spacing:-.01em}
+.sub{margin-top:18px;font-size:22px}
+table{margin-top:34px;width:100%;border-collapse:collapse;font-size:20px}td{border-bottom:1px solid rgba(0,0,0,.35);padding:12px 6px}
+.stamp{color:#4b2e9e;font-weight:700;transform:rotate(-3deg);display:inline-block;border:2px solid #4b2e9e;padding:2px 8px}
+.due{color:#c92a2a;border-color:#c92a2a}
+.btn{position:absolute;right:72px;bottom:110px;z-index:2;background:#1c1c1c;color:#e7d9b0;font-size:24px;padding:22px 32px;font-weight:700}
+.big{position:absolute;right:120px;top:60px;font-family:'Archivo Black';font-size:44px;color:#4b2e9e;border:6px solid #4b2e9e;padding:8px 18px;transform:rotate(8deg);opacity:.85}
+</style></head><body><div class="pocket"><span class="big">LENDLOOP</span>
+<h1>Borrow what you need.<br>Lend what you don't.</h1><p class="sub">Your street's tools, on one card.</p>
+<table><tr><td>Cordless drill</td><td>power tools</td><td><span class="stamp">OUT 12 NOV</span></td></tr><tr><td>4-person tent</td><td>camping</td><td><span class="stamp due">DUE 20 NOV</span></td></tr><tr><td>Hedge trimmer</td><td>garden</td><td><span class="stamp">IN</span></td></tr><tr><td>Stand mixer</td><td>kitchen</td><td><span class="stamp">IN</span></td></tr></table>
+<span class="btn">Sign in to borrow →</span></div></body></html>

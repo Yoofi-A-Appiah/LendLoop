@@ -3,7 +3,7 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { category } from "./schema";
 import { requireUser, today } from "./lib/auth";
-import { cancelPendingForTool, activeLoan } from "./loans";
+import { cancelPendingForTool, activeLoan, bookedRanges } from "./loans";
 
 const fields = {
   name: v.string(),
@@ -48,13 +48,15 @@ export const list = query({
     return Promise.all(
       tools.map(async (t) => {
         const owner = await ctx.db.get(t.ownerId);
-        const loan = await activeLoan(ctx, t._id, today());
+        const day = today();
+        const [loan, booked] = await Promise.all([activeLoan(ctx, t._id, day), bookedRanges(ctx, t._id, day)]);
         return {
           ...t,
           ownerName: owner?.name ?? "Unknown",
           ownerTrusted: owner?.trusted ?? false,
           isMine: t.ownerId === me._id,
           onLoanUntil: loan?.endDate ?? null,
+          booked,
         };
       }),
     );
