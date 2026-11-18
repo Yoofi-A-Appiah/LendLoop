@@ -17,7 +17,7 @@ import {
 type Category = (typeof CATEGORIES)[number];
 type ToolView = FunctionReturnType<typeof api.tools.list>[number];
 type LoanView = FunctionReturnType<typeof api.loans.mine>[number];
-type View = "rack" | "requests" | "tools" | "admin";
+type View = "rack" | "listings" | "mine" | "incoming" | "admin";
 
 // Server errors are the source of truth for permissions; show them as written.
 function useRun() {
@@ -71,8 +71,9 @@ function App() {
   const overdueLent = incoming?.filter((l) => l.overdue).length ?? 0;
   const nav: { id: View; label: string; count?: number }[] = [
     { id: "rack", label: "Rack" },
-    { id: "requests", label: "Requests", count: waiting + overdueLent },
-    { id: "tools", label: "My tools" },
+    { id: "listings", label: "My listings" },
+    { id: "mine", label: "My requests" },
+    { id: "incoming", label: "Incoming requests", count: waiting + overdueLent },
     ...(me?.role === "admin" ? [{ id: "admin" as View, label: "Admin" }] : []),
   ];
 
@@ -107,8 +108,9 @@ function App() {
         ) : (
           <>
             {view === "rack" && <Rack me={me} waiting={waiting} overdueLent={overdueLent} goTo={setView} />}
-            {view === "requests" && <Requests goTo={setView} />}
-            {view === "tools" && <MyTools />}
+            {view === "listings" && <MyListings />}
+            {view === "mine" && <MyRequests goTo={setView} />}
+            {view === "incoming" && <IncomingRequests goTo={setView} />}
             {view === "admin" && me.role === "admin" && <Admin />}
           </>
         )}
@@ -166,7 +168,7 @@ function Rack({ me, waiting, overdueLent, goTo }: { me: Doc<"users">; waiting: n
   return (
     <>
       {(waiting > 0 || overdueLent > 0) && (
-        <button onClick={() => goTo("requests")} className="mb-8 flex w-full items-center gap-4 rounded-[3px] bg-stock p-4 text-left shadow-[0_10px_24px_-18px_rgb(0_0_0/.5)] hover:shadow-[0_14px_28px_-16px_rgb(0_0_0/.5)] sm:p-5">
+        <button onClick={() => goTo("incoming")} className="mb-8 flex w-full items-center gap-4 rounded-[3px] bg-stock p-4 text-left shadow-[0_10px_24px_-18px_rgb(0_0_0/.5)] hover:shadow-[0_14px_28px_-16px_rgb(0_0_0/.5)] sm:p-5">
           <IconBell className="size-6 flex-none" />
           <span className="flex-1">
             <span className="block font-extrabold">
@@ -215,7 +217,7 @@ function Rack({ me, waiting, overdueLent, goTo }: { me: Doc<"users">; waiting: n
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-44" />)}</div>
       ) : tools.length === 0 ? (
         <Empty title="The rack is empty" body="Nobody has listed a tool yet. Be the first, and your neighbors will see it here.">
-          <button className="tab-btn" onClick={() => goTo("tools")}>List a tool</button>
+          <button className="tab-btn" onClick={() => goTo("listings")}>List a tool</button>
         </Empty>
       ) : shown.length === 0 ? (
         <Empty title="Nothing matches" body={filtered ? "Try another word or clear the filters." : ""}>
@@ -318,7 +320,7 @@ function SheetBody({ tool, isAdmin, onClose, goTo }: { tool: ToolView; isAdmin: 
         {tool.isMine ? (
           <div className="rounded-[3px] bg-f4 p-4 text-sm">
             This is your listing.{" "}
-            <button className="font-bold underline" onClick={() => { onClose(); goTo("tools"); }}>Edit it in My tools</button>
+            <button className="font-bold underline" onClick={() => { onClose(); goTo("listings"); }}>Edit it in My listings</button>
           </div>
         ) : (
           <form
@@ -443,97 +445,123 @@ const List = ({ children }: { children: React.ReactNode }) => (
   <ul className="divide-y divide-rule overflow-hidden rounded-[3px] shadow-[0_10px_24px_-20px_rgb(0_0_0/.6)]">{children}</ul>
 );
 
-function Requests({ goTo }: { goTo: (v: View) => void }) {
+const isClosed = (l: LoanView) => ["returned", "declined", "cancelled"].includes(l.status);
+
+function History({ loans, as }: { loans: LoanView[]; as: "owner" | "borrower" }) {
+  if (!loans.length) return null;
+  return (
+    <details className="group">
+      <summary className="mb-3 flex cursor-pointer list-none items-center gap-2 text-lg font-extrabold">
+        <IconArrow className="size-4 transition-transform group-open:rotate-90" /> History <span className="text-sm font-semibold text-ink-soft">{loans.length}</span>
+      </summary>
+      <List>{loans.map((l) => <LoanRow key={l._id} loan={l} as={as} />)}</List>
+    </details>
+  );
+}
+
+const LoansLoading = () => <div className="space-y-3"><div className="skeleton h-12 w-64" /><div className="skeleton h-28" /><div className="skeleton h-28" /></div>;
+
+/** Requests on your tools: answer them, then confirm returns. */
+function IncomingRequests({ goTo }: { goTo: (v: View) => void }) {
   const incoming = useQuery(api.loans.incoming);
-  const mine = useQuery(api.loans.mine);
   const decide = useMutation(api.loans.decide);
   const markReturned = useMutation(api.loans.markReturned);
-  const cancel = useMutation(api.loans.cancel);
   const { error, busy, run } = useRun();
-
-  if (!incoming || !mine) return <div className="space-y-3"><div className="skeleton h-12 w-64" /><div className="skeleton h-28" /><div className="skeleton h-28" /></div>;
+  if (!incoming) return <LoansLoading />;
 
   const waiting = incoming.filter((l) => l.status === "pending");
   const lentOut = incoming.filter((l) => l.status === "approved").sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.endDate.localeCompare(b.endDate));
-  const borrowing = mine.filter((l) => l.status === "pending" || l.status === "approved").sort((a, b) => Number(b.overdue) - Number(a.overdue));
-  const history = [...incoming.map((l) => ({ l: l, as: "owner" as const })), ...mine.map((l) => ({ l: l, as: "borrower" as const }))]
-    .filter(({ l }) => ["returned", "declined", "cancelled"].includes(l.status))
-    .sort((a, b) => b.l._creationTime - a.l._creationTime);
-
-  if (!incoming.length && !mine.length)
-    return (
-      <>
-        <PageTitle>Requests</PageTitle>
-        <Empty title="No requests yet" body="When you ask to borrow something, or a neighbor asks for one of your tools, it shows up here.">
-          <button className="tab-btn" onClick={() => goTo("rack")}>Browse the rack</button>
-        </Empty>
-      </>
-    );
 
   return (
     <>
-      <PageTitle>Requests</PageTitle>
+      <PageTitle>Incoming requests</PageTitle>
       <ErrorText error={error} />
-
-      {waiting.length > 0 && (
-        <Section title="Waiting for your answer" count={waiting.length}>
-          <List>
-            {waiting.map((l) => (
-              <LoanRow key={l._id} loan={l} as="owner">
-                <button className="tab-btn small" disabled={busy} onClick={() => run(() => decide({ loanId: l._id, approve: true }), `Approved. ${l.borrowerName} has been told`)}>Approve</button>
-                <button className="ghost-btn" disabled={busy} onClick={() => run(() => decide({ loanId: l._id, approve: false }), "Declined")}>Decline</button>
-              </LoanRow>
-            ))}
-          </List>
-        </Section>
-      )}
-
-      {lentOut.length > 0 && (
-        <Section title="Lent out" count={lentOut.length}>
-          <List>
-            {lentOut.map((l) => (
-              <LoanRow key={l._id} loan={l} as="owner">
-                <button className="tab-btn small" disabled={busy} onClick={() => run(() => markReturned({ loanId: l._id }), "Marked as returned")}>It&apos;s back</button>
-              </LoanRow>
-            ))}
-          </List>
-        </Section>
-      )}
-
-      {borrowing.length > 0 && (
-        <Section title="Your borrowing" count={borrowing.length}>
-          <List>
-            {borrowing.map((l) => (
-              <LoanRow key={l._id} loan={l} as="borrower">
-                {l.status === "pending" && <button className="ghost-btn" disabled={busy} onClick={() => run(() => cancel({ loanId: l._id }), "Request withdrawn")}>Withdraw</button>}
-              </LoanRow>
-            ))}
-          </List>
-        </Section>
-      )}
-
-      {history.length > 0 && (
-        <details className="group">
-          <summary className="mb-3 flex cursor-pointer list-none items-center gap-2 text-lg font-extrabold">
-            <IconArrow className="size-4 transition-transform group-open:rotate-90" /> History <span className="text-sm font-semibold text-ink-soft">{history.length}</span>
-          </summary>
-          <List>{history.map(({ l, as }) => <LoanRow key={l._id} loan={l} as={as} />)}</List>
-        </details>
+      {!incoming.length ? (
+        <Empty title="No requests for your tools yet" body="When a neighbor asks to borrow one of your listings, it lands here for you to approve or decline.">
+          <button className="tab-btn" onClick={() => goTo("listings")}>Go to My listings</button>
+        </Empty>
+      ) : (
+        <>
+          {waiting.length > 0 && (
+            <Section title="Waiting for your answer" count={waiting.length}>
+              <List>
+                {waiting.map((l) => (
+                  <LoanRow key={l._id} loan={l} as="owner">
+                    <button className="tab-btn small" disabled={busy} onClick={() => run(() => decide({ loanId: l._id, approve: true }), `Approved. ${l.borrowerName} has been told`)}>Approve</button>
+                    <button className="ghost-btn" disabled={busy} onClick={() => run(() => decide({ loanId: l._id, approve: false }), "Declined")}>Decline</button>
+                  </LoanRow>
+                ))}
+              </List>
+            </Section>
+          )}
+          {lentOut.length > 0 && (
+            <Section title="Lent out" count={lentOut.length}>
+              <List>
+                {lentOut.map((l) => (
+                  <LoanRow key={l._id} loan={l} as="owner">
+                    <button className="tab-btn small" disabled={busy} onClick={() => run(() => markReturned({ loanId: l._id }), "Marked as returned")}>Mark returned</button>
+                  </LoanRow>
+                ))}
+              </List>
+            </Section>
+          )}
+          {!waiting.length && !lentOut.length && <p className="mb-8 text-ink-soft">Nothing needs you right now.</p>}
+          <History loans={incoming.filter(isClosed)} as="owner" />
+        </>
       )}
     </>
   );
 }
 
-// ---------------- My tools ----------------
+/** Things you asked to borrow. */
+function MyRequests({ goTo }: { goTo: (v: View) => void }) {
+  const mine = useQuery(api.loans.mine);
+  const cancel = useMutation(api.loans.cancel);
+  const { error, busy, run } = useRun();
+  if (!mine) return <LoansLoading />;
+
+  const active = mine.filter((l) => !isClosed(l)).sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.startDate.localeCompare(b.startDate));
+
+  return (
+    <>
+      <PageTitle>My requests</PageTitle>
+      <ErrorText error={error} />
+      {!mine.length ? (
+        <Empty title="You haven't borrowed anything yet" body="Find a tool on the rack, pick your days, and your request shows up here.">
+          <button className="tab-btn" onClick={() => goTo("rack")}>Browse the rack</button>
+        </Empty>
+      ) : (
+        <>
+          {active.length > 0 ? (
+            <Section title="Current" count={active.length}>
+              <List>
+                {active.map((l) => (
+                  <LoanRow key={l._id} loan={l} as="borrower">
+                    {l.status === "pending" && <button className="ghost-btn" disabled={busy} onClick={() => run(() => cancel({ loanId: l._id }), "Request withdrawn")}>Withdraw</button>}
+                  </LoanRow>
+                ))}
+              </List>
+            </Section>
+          ) : (
+            <p className="mb-8 text-ink-soft">No open requests.</p>
+          )}
+          <History loans={mine.filter(isClosed)} as="borrower" />
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------- My listings ----------------
 
 const CONDITIONS = ["Like new", "Good", "Fair", "Well used"];
 
-function MyTools() {
+function MyListings() {
   const tools = useQuery(api.tools.mine);
   const [editing, setEditing] = useState<Doc<"tools"> | null>(null);
   return (
     <>
-      <PageTitle>My tools</PageTitle>
+      <PageTitle>My listings</PageTitle>
       <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
         <ToolForm key={editing?._id ?? "new"} tool={editing} onDone={() => setEditing(null)} />
         {tools === undefined ? (

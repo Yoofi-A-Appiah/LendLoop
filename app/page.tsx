@@ -73,7 +73,7 @@ export default function Home() {
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <PrimaryAction className="py-4 pr-6 text-base" />
               <p className="code text-ink-soft">
-                {tools === undefined ? " " : tools.length === 1 ? "1 tool on the rack" : `${tools.length} tools on the rack`}
+                {tools === undefined ? " " : tools.length === 1 ? "1 tool available now" : `${tools.length} tools available now`}
               </p>
             </div>
           </div>

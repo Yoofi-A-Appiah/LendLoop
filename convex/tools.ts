@@ -27,12 +27,18 @@ async function ownedTool(ctx: QueryCtx, toolId: Id<"tools">, user: Doc<"users">,
   return tool;
 }
 
-/** Public: name + category only. No owner details leave the server. */
+/** Public: tools available right now (not out on loan), name + category only. No owner details leave the server. */
 export const listPublic = query({
   args: {},
   handler: async (ctx) => {
+    const day = today();
+    const out = new Set(
+      (await ctx.db.query("loans").withIndex("by_status_end", (q) => q.eq("status", "approved")).collect())
+        .filter((l) => l.startDate <= day)
+        .map((l) => l.toolId),
+    );
     const tools = await ctx.db.query("tools").order("desc").take(200);
-    return tools.map((t) => ({ _id: t._id, name: t.name, category: t.category }));
+    return tools.filter((t) => !out.has(t._id)).map((t) => ({ _id: t._id, name: t.name, category: t.category }));
   },
 });
 
